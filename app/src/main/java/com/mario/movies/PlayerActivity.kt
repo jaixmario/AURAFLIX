@@ -30,6 +30,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -41,19 +43,21 @@ import kotlinx.coroutines.delay
 import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
+import android.content.Intent
 
 class PlayerActivity : ComponentActivity() {
     private var isInPipMode = mutableStateOf(false)
     private var libVLC: LibVLC? = null
     private var mediaPlayer: MediaPlayer? = null
+    private var videoUrlState = mutableStateOf("")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
         
-        val videoUrl = intent.getStringExtra("VIDEO_URL") ?: ""
-        if (videoUrl.isEmpty()) {
+        videoUrlState.value = intent.getStringExtra("VIDEO_URL") ?: ""
+        if (videoUrlState.value.isEmpty()) {
             finish()
             return
         }
@@ -69,13 +73,22 @@ class PlayerActivity : ComponentActivity() {
         setContent {
             MOVIESTheme {
                 VLCPlayerScreen(
-                    videoUrl = videoUrl,
+                    videoUrl = videoUrlState.value,
                     mediaPlayer = mediaPlayer!!,
                     onBack = { finish() },
                     isInPipMode = isInPipMode.value,
                     modifier = Modifier.fillMaxSize()
                 )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val newUrl = intent.getStringExtra("VIDEO_URL") ?: ""
+        if (newUrl.isNotEmpty()) {
+            videoUrlState.value = newUrl
         }
     }
 
@@ -137,6 +150,19 @@ fun VLCPlayerScreen(
         }
     }
 
+    // Handle new video URL
+    LaunchedEffect(videoUrl) {
+        if (videoUrl.isNotEmpty()) {
+            mediaPlayer.stop()
+            val media = Media(mediaPlayer.libVLC, Uri.parse(videoUrl))
+            media.setHWDecoderEnabled(true, false)
+            media.addOption(":network-caching=1500")
+            mediaPlayer.media = media
+            media.release()
+            mediaPlayer.play()
+        }
+    }
+
     DisposableEffect(isInPipMode) {
         if (!isInPipMode) {
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
@@ -187,12 +213,7 @@ fun VLCPlayerScreen(
                             vout.setVideoView(this@apply)
                             vout.attachViews()
                             
-                            val media = Media(mediaPlayer.libVLC, Uri.parse(videoUrl))
-                            media.setHWDecoderEnabled(true, false)
-                            media.addOption(":network-caching=1500")
-                            mediaPlayer.media = media
-                            media.release()
-                            mediaPlayer.play()
+                            // Media is handled by LaunchedEffect(videoUrl)
                         }
                         override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
                             mediaPlayer.vlcVout.setWindowSize(width, height)
@@ -295,7 +316,7 @@ fun VLCPlayerScreen(
             onDismissRequest = { showAudioDialog = false },
             title = { Text("Select Audio Track") },
             text = {
-                Column {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                     tracks?.forEach { track ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -323,7 +344,7 @@ fun VLCPlayerScreen(
             onDismissRequest = { showSubtitleDialog = false },
             title = { Text("Select Subtitles") },
             text = {
-                Column {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                     // Option to disable subtitles
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
