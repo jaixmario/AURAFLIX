@@ -4,6 +4,7 @@ import android.content.Context
 import android.widget.Toast
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.google.gson.annotations.SerializedName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
@@ -17,7 +18,9 @@ import java.io.InputStreamReader
 data class TokenData(
     val access_token: String,
     val refresh_token: String,
-    val expires_in: Long,
+    @SerializedName("expires_in")
+    val expires_in: Long = 3600,
+    @SerializedName("expires_at", alternate = ["expire_at"])
     val expire_at: Long? // Timestamp when it expires
 )
 
@@ -43,6 +46,9 @@ class TokenManager(private val context: Context) {
         
         private const val PREFS_NAME = "dev_prefs"
         private const val KEY_DEV_MODE = "developer_mode"
+
+        private const val GITHUB_TOKEN_URL = "https://raw.githubusercontent.com/jaixmario/token-db/refs/heads/main/user_token.json"
+        private const val GITHUB_TOKEN_MARIO_URL = "https://raw.githubusercontent.com/jaixmario/token-db/refs/heads/main/user_token2.json"
     }
 
     private fun isDevMode(): Boolean {
@@ -63,21 +69,45 @@ class TokenManager(private val context: Context) {
     }
 
     suspend fun getAccessToken(isMario: Boolean = false): String? = withContext(Dispatchers.IO) {
-        val tokenData = loadToken(isMario)
+        var tokenData = loadToken(isMario)
         if (tokenData == null) {
-            showToast("Error: No token data found (${if(isMario) "Mario" else "Default"})")
+            showToast("Token missing, trying to update from Server...")
+            if (updateTokensFromGithub()) {
+                tokenData = loadToken(isMario)
+            }
+        }
+        
+        if (tokenData == null) {
+            showToast("Error: No token data found (${if(isMario) "Server" else "Default"})")
             return@withContext null
         }
         
+        val finalTokenData = tokenData!!
+        
         val currentTime = System.currentTimeMillis() / 1000
-        val expiryTime = tokenData.expire_at ?: (currentTime + tokenData.expires_in)
+        val expiryTime = finalTokenData.expire_at ?: (currentTime + finalTokenData.expires_in)
         
         if (currentTime > expiryTime - 300) {
-            showToast("Refreshing ${if(isMario) "Mario" else "Default"} token...")
-            return@withContext refreshToken(tokenData.refresh_token, isMario)
+            showToast("Refreshing ${if(isMario) "Server" else "Default"} token...")
+            val refreshed = refreshToken(finalTokenData.refresh_token, isMario)
+            if (refreshed != null) return@withContext refreshed
+            
+            // If refresh failed, try updating from SERVER as a fallback
+            showToast("Refresh failed, trying update from Server...")
+            if (updateTokensFromGithub()) {
+                val newTokenData = loadToken(isMario)
+                if (newTokenData != null) {
+                    val newExpiry = newTokenData.expire_at ?: (currentTime + newTokenData.expires_in)
+                    if (currentTime < newExpiry - 300) {
+                        return@withContext newTokenData.access_token
+                    }
+                    // If the new token from github also needs refresh, try it once
+                    return@withContext refreshToken(newTokenData.refresh_token, isMario)
+                }
+            }
         }
         
-        return@withContext tokenData.access_token
+        return@withContext finalTokenData.access_token
     }
     
     private suspend fun loadToken(isMario: Boolean): TokenData? {
@@ -97,7 +127,7 @@ class TokenManager(private val context: Context) {
             val tokenData = gson.fromJson(reader, TokenData::class.java)
             initializeToken(tokenData, isMario)
         } catch (e: Exception) {
-            if (isMario) showToast("Mario token file not found in assets")
+            if (isMario) showToast("Server token file not found in assets")
             null
         }
     }
@@ -134,19 +164,20 @@ class TokenManager(private val context: Context) {
             .build()
             
         try {
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful) {
-                val json = response.body?.string() ?: return null
-                val newToken = gson.fromJson(json, TokenData::class.java)
-                
-                val currentTime = System.currentTimeMillis() / 1000
-                val updatedToken = newToken.copy(expire_at = currentTime + newToken.expires_in)
-                
-                saveToken(updatedToken, isMario)
-                showToast("${if(isMario) "Mario" else "Default"} token refreshed")
-                return updatedToken.access_token
-            } else {
-                showToast("Refresh failed (${if(isMario) "Mario" else "Default"}): ${response.code}")
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val json = response.body?.string() ?: return null
+                    val newToken = gson.fromJson(json, TokenData::class.java)
+                    
+                    val currentTime = System.currentTimeMillis() / 1000
+                    val updatedToken = newToken.copy(expire_at = currentTime + newToken.expires_in)
+                    
+                    saveToken(updatedToken, isMario)
+                    showToast("${if(isMario) "Server" else "Default"} token refreshed")
+                    return updatedToken.access_token
+                } else {
+                    showToast("Refresh failed (${if(isMario) "Server" else "Default"}): ${response.code}")
+                }
             }
         } catch (e: Exception) {
             showToast("Refresh exception: ${e.message}")
@@ -154,13 +185,39 @@ class TokenManager(private val context: Context) {
         return null
     }
     
+    suspend fun updateTokensFromGithub(): Boolean = withContext(Dispatchers.IO) {
+        val successDefault = downloadAndSaveToken(GITHUB_TOKEN_URL, false)
+        val successMario = downloadAndSaveToken(GITHUB_TOKEN_MARIO_URL, true)
+        successDefault || successMario
+    }
+
+    private suspend fun downloadAndSaveToken(url: String, isMario: Boolean): Boolean {
+        val request = Request.Builder().url(url).build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val json = response.body?.string() ?: return false
+                    val tokenData = gson.fromJson(json, TokenData::class.java)
+                    initializeToken(tokenData, isMario)
+                    true
+                } else {
+                    showToast("Server download failed: ${response.code}")
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            showToast("Server download error: ${e.message}")
+            false
+        }
+    }
+
     suspend fun getLinks(originalItemId: String): Links? = withContext(Dispatchers.IO) {
         val isMario = originalItemId.startsWith("MARIO")
         val itemId = if (isMario) originalItemId.removePrefix("MARIO") else originalItemId
         
-        showToast("Generating link for ${if(isMario) "Mario" else "Default"} ID")
+        showToast("Generating link for ${if(isMario) "Server" else "Default"} ID")
         
-        val token = getAccessToken(isMario) 
+        val token = getAccessToken(isMario)
         if (token == null) {
             showToast("Failed: No token")
             return@withContext null
