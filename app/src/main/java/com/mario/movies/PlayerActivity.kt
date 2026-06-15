@@ -23,6 +23,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -30,12 +33,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.mario.movies.ui.theme.MOVIESTheme
@@ -212,8 +215,6 @@ fun VLCPlayerScreen(
                             val vout = mediaPlayer.vlcVout
                             vout.setVideoView(this@apply)
                             vout.attachViews()
-                            
-                            // Media is handled by LaunchedEffect(videoUrl)
                         }
                         override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
                             mediaPlayer.vlcVout.setWindowSize(width, height)
@@ -310,71 +311,109 @@ fun VLCPlayerScreen(
     }
 
     if (showAudioDialog) {
-        val tracks = mediaPlayer.audioTracks
-        val currentTrackId = mediaPlayer.audioTrack
-        AlertDialog(
-            onDismissRequest = { showAudioDialog = false },
-            title = { Text("Select Audio Track") },
-            text = {
-                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    tracks?.forEach { track ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth().clickable {
-                                mediaPlayer.audioTrack = track.id
-                                showAudioDialog = false
-                            }.padding(8.dp)
-                        ) {
-                            RadioButton(selected = track.id == currentTrackId, onClick = null)
-                            Text(track.name ?: "Unknown", modifier = Modifier.padding(start = 8.dp))
-                        }
-                    }
-                }
+        TrackSelectionDialog(
+            title = "Audio tracks",
+            tracks = mediaPlayer.audioTracks?.toList() ?: emptyList(),
+            currentTrackId = mediaPlayer.audioTrack,
+            onTrackSelected = {
+                mediaPlayer.audioTrack = it
+                showAudioDialog = false
             },
-            confirmButton = {
-                TextButton(onClick = { showAudioDialog = false }) { Text("Close") }
-            }
+            onDismiss = { showAudioDialog = false }
         )
     }
 
     if (showSubtitleDialog) {
-        val tracks = mediaPlayer.spuTracks
-        val currentTrackId = mediaPlayer.spuTrack
-        AlertDialog(
-            onDismissRequest = { showSubtitleDialog = false },
-            title = { Text("Select Subtitles") },
-            text = {
+        TrackSelectionDialog(
+            title = "Subtitles",
+            tracks = mediaPlayer.spuTracks?.toList() ?: emptyList(),
+            currentTrackId = mediaPlayer.spuTrack,
+            onTrackSelected = {
+                mediaPlayer.spuTrack = it
+                showSubtitleDialog = false
+            },
+            onDismiss = { showSubtitleDialog = false },
+            showDisableOption = true
+        )
+    }
+}
+
+@Composable
+fun TrackSelectionDialog(
+    title: String,
+    tracks: List<MediaPlayer.TrackDescription>,
+    currentTrackId: Int,
+    onTrackSelected: (Int) -> Unit,
+    onDismiss: () -> Unit,
+    showDisableOption: Boolean = false
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+            modifier = Modifier.width(320.dp).heightIn(max = 400.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 16.dp, start = 8.dp)
+                )
+                
                 Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    // Option to disable subtitles
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clickable {
-                            mediaPlayer.spuTrack = -1
-                            showSubtitleDialog = false
-                        }.padding(8.dp)
-                    ) {
-                        RadioButton(selected = currentTrackId == -1, onClick = null)
-                        Text("None", modifier = Modifier.padding(start = 8.dp))
+                    if (showDisableOption) {
+                        TrackItem(
+                            name = "Disable Subtitles",
+                            isSelected = currentTrackId == -1,
+                            onClick = { onTrackSelected(-1) }
+                        )
                     }
                     
-                    tracks?.forEach { track ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth().clickable {
-                                mediaPlayer.spuTrack = track.id
-                                showSubtitleDialog = false
-                            }.padding(8.dp)
-                        ) {
-                            RadioButton(selected = track.id == currentTrackId, onClick = null)
-                            Text(track.name ?: "Unknown", modifier = Modifier.padding(start = 8.dp))
+                    tracks.forEach { track ->
+                        // Skip any track named "Disable" from VLC to avoid duplicates
+                        if (track.name.lowercase() != "disable") {
+                            TrackItem(
+                                name = track.name,
+                                isSelected = track.id == currentTrackId,
+                                onClick = { onTrackSelected(track.id) }
+                            )
                         }
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { showSubtitleDialog = false }) { Text("Close") }
+                
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.align(Alignment.End).padding(top = 8.dp)
+                ) {
+                    Text("Cancel")
+                }
             }
-        )
+        }
+    }
+}
+
+@Composable
+fun TrackItem(name: String, isSelected: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+        ) {
+            RadioButton(selected = isSelected, onClick = null)
+            Text(
+                text = name,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(start = 12.dp)
+            )
+        }
     }
 }
 
