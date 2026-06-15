@@ -137,6 +137,7 @@ fun VLCPlayerScreen(
     var currentTime by remember { mutableLongStateOf(0L) }
     var totalTime by remember { mutableLongStateOf(0L) }
     var isPlaying by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(true) }
     var showControls by remember { mutableStateOf(true) }
     var showAudioDialog by remember { mutableStateOf(false) }
     var showSubtitleDialog by remember { mutableStateOf(false) }
@@ -146,8 +147,8 @@ fun VLCPlayerScreen(
     }
 
     // Auto-hide controls
-    LaunchedEffect(showControls, isPlaying) {
-        if (showControls && isPlaying) {
+    LaunchedEffect(showControls, isPlaying, isLoading) {
+        if (showControls && isPlaying && !isLoading) {
             delay(3000)
             showControls = false
         }
@@ -156,6 +157,7 @@ fun VLCPlayerScreen(
     // Handle new video URL
     LaunchedEffect(videoUrl) {
         if (videoUrl.isNotEmpty()) {
+            isLoading = true
             mediaPlayer.stop()
             val media = Media(mediaPlayer.libVLC, Uri.parse(videoUrl))
             media.setHWDecoderEnabled(true, false)
@@ -181,10 +183,21 @@ fun VLCPlayerScreen(
                 when (event.type) {
                     MediaPlayer.Event.TimeChanged -> currentTime = event.timeChanged
                     MediaPlayer.Event.LengthChanged -> totalTime = event.lengthChanged
-                    MediaPlayer.Event.Playing -> isPlaying = true
+                    MediaPlayer.Event.Playing -> {
+                        isPlaying = true
+                        isLoading = false
+                    }
                     MediaPlayer.Event.Paused -> isPlaying = false
                     MediaPlayer.Event.Stopped -> isPlaying = false
+                    MediaPlayer.Event.Buffering -> {
+                        isLoading = event.buffering < 100f
+                    }
+                    MediaPlayer.Event.Opening -> isLoading = true
                     MediaPlayer.Event.EndReached -> onBack()
+                    MediaPlayer.Event.EncounteredError -> {
+                        isLoading = false
+                        onBack()
+                    }
                 }
             }
         }
@@ -231,6 +244,29 @@ fun VLCPlayerScreen(
                     indication = null
                 ) { showControls = !showControls }
         )
+
+        // Loading Indicator
+        AnimatedVisibility(
+            visible = isLoading && !isInPipMode,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.Center)
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator(
+                    color = MaterialTheme.colorScheme.primary,
+                    strokeWidth = 4.dp,
+                    modifier = Modifier.size(60.dp)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Loading...",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
 
         AnimatedVisibility(
             visible = showControls && !isInPipMode,
