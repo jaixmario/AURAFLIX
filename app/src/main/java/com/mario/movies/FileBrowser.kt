@@ -341,6 +341,21 @@ fun FileBrowser(
                         if (generatedLinks?.downloadLink != null) {
                             Button(
                                 onClick = {
+                                    val intent = Intent(context, PlayerActivity::class.java).apply {
+                                        putExtra("VIDEO_URL", generatedLinks!!.downloadLink)
+                                        putExtra("VIDEO_TITLE", dialogItem!!.name)
+                                    }
+                                    context.startActivity(intent)
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Inbuilt Player")
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = {
                                      try {
                                         val intent = Intent(Intent.ACTION_VIEW).apply {
                                             setDataAndType(Uri.parse(generatedLinks!!.downloadLink!!), "video/*")
@@ -352,7 +367,7 @@ fun FileBrowser(
                             ) {
                                 Icon(Icons.Default.PlayArrow, contentDescription = null)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Play with...")
+                                Text("External Player")
                             }
                             Spacer(modifier = Modifier.height(8.dp))
                             OutlinedButton(
