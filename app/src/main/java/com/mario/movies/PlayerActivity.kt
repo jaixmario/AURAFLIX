@@ -269,7 +269,7 @@ fun VLCPlayerScreen(
         }
 
         AnimatedVisibility(
-            visible = showControls && !isInPipMode,
+            visible = showControls && !isLoading && !isInPipMode,
             enter = fadeIn(),
             exit = fadeOut()
         ) {
