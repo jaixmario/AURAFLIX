@@ -7,10 +7,13 @@ import com.google.gson.JsonObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
+import com.google.gson.annotations.SerializedName
 import okhttp3.Request
 
 data class RemoteDbInfo(
+    @SerializedName("version")
     val version: String,
+    @SerializedName("file_id")
     val file_id: String
 )
 

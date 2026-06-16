@@ -16,7 +16,9 @@ import java.io.File
 import java.io.InputStreamReader
 
 data class TokenData(
+    @SerializedName("access_token")
     val access_token: String,
+    @SerializedName("refresh_token")
     val refresh_token: String,
     @SerializedName("expires_in")
     val expires_in: Long = 3600,
