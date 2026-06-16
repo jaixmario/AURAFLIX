@@ -271,7 +271,8 @@ class TokenManager(private val context: Context) {
                 if (responseObj.has("link")) {
                     val linkObj = responseObj.getAsJsonObject("link")
                     if (linkObj.has("webUrl")) {
-                        shareLink = linkObj.get("webUrl").asString
+                        val rawShareLink = linkObj.get("webUrl").asString
+                        shareLink = if (rawShareLink.contains("?")) "$rawShareLink&download=1" else "$rawShareLink?download=1"
                     }
                 }
             }
